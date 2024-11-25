@@ -16,7 +16,7 @@ pub mod staking_contract {
         config.stake_token_mint = ctx.accounts.stake_token_mint.key();
         config.apy = apy;
         config.total_pool_size = 0;
-        config.bump = *ctx.bumps.get("config").unwrap();
+        config.bump = ctx.bumps.config;
         Ok(())
     }
 
@@ -41,83 +41,81 @@ pub mod staking_contract {
     }
 
     pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
-        // Ensure the amount to stake is valid
-        require!(amount > 0, StakingError::InvalidStakeAmount);
+        let bump = ctx.accounts.config.bump;
+        let current_time = Clock::get()?.unix_timestamp as u64;
 
-        // Perform transfers before mutably borrowing accounts
+        // Do token operations before mutable borrows
         token::transfer(
             ctx.accounts
                 .transfer_ctx()
-                .with_signer(&[&[b"config", &[ctx.accounts.config.bump]]]),
+                .with_signer(&[&[b"config", &[bump]]]),
             amount,
         )?;
 
         token::mint_to(
             ctx.accounts
                 .mint_ctx()
-                .with_signer(&[&[b"config", &[ctx.accounts.config.bump]]]),
+                .with_signer(&[&[b"config", &[bump]]]),
             amount,
         )?;
 
-        // Now mutably borrow accounts
+        // Now do mutable operations
         let user = &mut ctx.accounts.user;
         let config = &mut ctx.accounts.config;
 
-        // Update state
         user.stake_info.amount += amount;
-        user.stake_info.timestamp = Clock::get()?.unix_timestamp as u64;
+        user.stake_info.timestamp = current_time;
         config.total_pool_size += amount;
 
         Ok(())
     }
 
     pub fn unstake(ctx: Context<Unstake>, amount: u64) -> Result<()> {
-        let user = &mut ctx.accounts.user;
-        let config = &mut ctx.accounts.config;
-
         // Ensure the user has enough tokens staked
-        require!(user.stake_info.amount >= amount, StakingError::InsufficientStake);
-
-        // Burn the stake tokens from the user
+        require!(ctx.accounts.user.stake_info.amount >= amount, StakingError::InsufficientStake);
+        
+        // Get the bump and perform token operations before mutable borrows
+        let bump = ctx.accounts.config.bump;
+        
         token::burn(
             ctx.accounts
                 .burn_ctx()
-                .with_signer(&[&[b"config", &[config.bump]]]),
+                .with_signer(&[&[b"config", &[bump]]]),
             amount,
         )?;
 
-        // Transfer the real tokens back to the user
         token::transfer(
             ctx.accounts
                 .transfer_ctx()
-                .with_signer(&[&[b"config", &[config.bump]]]),
+                .with_signer(&[&[b"config", &[bump]]]),
             amount,
         )?;
 
+        // Now do the mutable operations
+        let user = &mut ctx.accounts.user;
+        let config = &mut ctx.accounts.config;
+        
         user.stake_info.amount -= amount;
         if user.stake_info.amount == 0 {
             user.stake_info.timestamp = 0;
         }
-
         config.total_pool_size -= amount;
 
         Ok(())
     }
 
     pub fn claim(ctx: Context<Claim>) -> Result<()> {
-        let user = &mut ctx.accounts.user;
-        let config = &mut ctx.accounts.config;
-
         let current_time = Clock::get()?.unix_timestamp as u64;
-
+        let bump = ctx.accounts.config.bump;
+        
         // Calculate rewards based on time staked and APY
-        let duration = current_time - user.stake_info.timestamp;
-        let rewards = (user.stake_info.amount as u128)
-            .checked_mul(config.apy as u128)
+        let duration = current_time - ctx.accounts.user.stake_info.timestamp;
+        let rewards = (ctx.accounts.user.stake_info.amount as u128)
+            .checked_mul(ctx.accounts.config.apy as u128)
             .unwrap()
             .checked_mul(duration as u128)
             .unwrap()
-            / (100 * 365 * 24 * 3600) as u128;
+            / (100u128 * 365u128 * 24u128 * 3600u128);
 
         let rewards = rewards as u64;
 
@@ -125,10 +123,12 @@ pub mod staking_contract {
         token::mint_to(
             ctx.accounts
                 .mint_ctx()
-                .with_signer(&[&[b"config", &[config.bump]]]),
+                .with_signer(&[&[b"config", &[bump]]]),
             rewards,
         )?;
 
+        // Update timestamp after minting
+        let user = &mut ctx.accounts.user;
         user.stake_info.timestamp = current_time;
 
         Ok(())
@@ -148,8 +148,10 @@ pub struct InitializeContract<'info> {
     pub config: Account<'info, Config>,
     #[account(mut)]
     pub admin: Signer<'info>,
-    pub real_token_mint: Account<'info, Mint>,
-    pub stake_token_mint: Account<'info, Mint>,
+    /// CHECK: This is not dangerous because we don't need to read or write data from this account
+    pub real_token_mint: AccountInfo<'info>,
+    /// CHECK: This is not dangerous because we don't need to read or write data from this account
+    pub stake_token_mint: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -157,12 +159,8 @@ pub struct InitializeContract<'info> {
 #[derive(Accounts)]
 pub struct Deposit<'info> {
     #[account(mut)]
-    pub user: Account<'info, User>, 
-    #[account(
-        mut,
-        seeds = [b"config"],
-        bump = config.bump
-    )]
+    pub user: Account<'info, User>,
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
     pub config: Account<'info, Config>,
     #[account(
         mut,

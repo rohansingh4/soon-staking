@@ -8,11 +8,11 @@ skip-lint = false
 soon_staking = "DnQ75Ca5uuoT91xQ59GpfP73GR38j12G6njJFNptaFWJ"
 
 [registry]
-url = "https://api.apr.dev"
+url = "https://anchor.projectserum.com"
 
 
 [provider]
-cluster = "Localnet"
+cluster = "https://rpc.testnet.soo.network/rpc"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
