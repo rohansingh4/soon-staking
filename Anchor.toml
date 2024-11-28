@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-soon_staking = "DnQ75Ca5uuoT91xQ59GpfP73GR38j12G6njJFNptaFWJ"
+soon_staking = "66rNZNDufxtoJwGEFkQ9T6rm3P1Ex5Wd4V7MF6os1SVG"
 
 [registry]
 url = "https://anchor.projectserum.com"
